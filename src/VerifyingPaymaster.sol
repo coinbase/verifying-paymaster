@@ -6,7 +6,6 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-
 /// @title Coinbase Developer Platform Paymaster
 ///
 /// @notice ERC4337 Paymaster implementation compatible with Entrypoint v0.6.
@@ -42,29 +41,21 @@ contract VerifyingPaymaster is BasePaymaster {
         uint256 exchangeRate;
     }
 
-    uint256 public constant POST_OP_GAS_OVERHEAD = 24000;
+    uint256 public constant POST_OP_GAS_OVERHEAD = 24_000;
 
     /// @notice The address to verify the signature against
     address public verifyingSigner;
     address public pendingVerifyingSigner;
 
     /// @notice Allowlist of bundlers to use if restricting bundlers is enabled
-    mapping (address bundler => bool allowed) public bundlerAllowed;
+    mapping(address bundler => bool allowed) public bundlerAllowed;
 
-     /// @notice Event for a sponsored user operation without a token payment (could be an unsuccessful transfer)
-    event UserOperationSponsored(
-        bytes32 indexed userOperationHash,
-        uint128 indexed sponsorId,
-        address token 
-    );
+    /// @notice Event for a sponsored user operation without a token payment (could be an unsuccessful transfer)
+    event UserOperationSponsored(bytes32 indexed userOperationHash, uint128 indexed sponsorId, address token);
 
-     /// @notice Event for a sponsored user operation with a token payment
+    /// @notice Event for a sponsored user operation with a token payment
     event UserOperationSponsoredWithERC20(
-        bytes32 indexed userOperationHash,
-        uint128 indexed sponsorId,
-        address indexed token,
-        address receiver,
-        uint256 amount
+        bytes32 indexed userOperationHash, uint128 indexed sponsorId, address indexed token, address receiver, uint256 amount
     );
 
     /// @notice Event for setting a pending verifying signer
@@ -76,21 +67,21 @@ contract VerifyingPaymaster is BasePaymaster {
     /// @notice Error for invalid parameters
     error InvalidParam(string errorMessage);
 
-    /// @notice Error for not holding enough balance during prevalidation 
+    /// @notice Error for not holding enough balance during prevalidation
     ///
     /// @param token - token address
     /// @param balance - balance of the sender in the specified token
     /// @param maxTokenCost - maximum token cost
     error SenderTokenBalanceTooLow(address token, uint256 balance, uint256 maxTokenCost);
 
-    /// @notice Error for not having the paymaster approved during prevalidation 
+    /// @notice Error for not having the paymaster approved during prevalidation
     ///
     /// @param token - token address
     /// @param approval - amount approved for the paymaster to withdraw
     /// @param maxTokenCost - maximum token cost
     error SenderTokenApprovalTooLow(address token, uint256 approval, uint256 maxTokenCost);
 
-    /// @notice Error for bundler not allowed 
+    /// @notice Error for bundler not allowed
     error BundlerNowAllowed();
 
     /// @notice Error for calling a disabled function
@@ -106,7 +97,14 @@ contract VerifyingPaymaster is BasePaymaster {
     ///
     /// @param _entryPoint - the entrypoint contract
     /// @param _verifyingSigner - the address to verify the signature against
-    constructor(IEntryPoint _entryPoint, address _verifyingSigner, address _initialOwner) BasePaymaster(_entryPoint) Ownable() {
+    constructor(
+        IEntryPoint _entryPoint,
+        address _verifyingSigner,
+        address _initialOwner
+    )
+        BasePaymaster(_entryPoint)
+        Ownable()
+    {
         if (address(_entryPoint).code.length == 0) {
             revert InvalidParam("entryPoint is not a contract");
         }
@@ -123,8 +121,7 @@ contract VerifyingPaymaster is BasePaymaster {
     //
     /// @param userOp - UserOperation struct
     /// @param paymasterData - PaymasterData struct
-    function getHash(UserOperation calldata userOp, PaymasterData memory paymasterData)
-    public view returns (bytes32) {
+    function getHash(UserOperation calldata userOp, PaymasterData memory paymasterData) public view returns (bytes32) {
         // can't use userOp.hash(), since it contains also the paymasterAndData itself.
         return keccak256(
             abi.encode(
@@ -145,9 +142,17 @@ contract VerifyingPaymaster is BasePaymaster {
     }
 
     /// @inheritdoc BasePaymaster
-    function _validatePaymasterUserOp(UserOperation calldata userOp, bytes32 userOpHash, uint256 maxCost)
-    internal view override returns (bytes memory context, uint256 validationData) {
-        (PaymasterData memory paymasterData, bytes memory signature) = parsePaymasterAndData(userOp.paymasterAndData);
+    function _validatePaymasterUserOp(
+        UserOperation calldata userOp,
+        bytes32 userOpHash,
+        uint256 maxCost
+    )
+        internal
+        view
+        override
+        returns (bytes memory context, uint256 validationData)
+    {
+        (PaymasterData memory paymasterData, bytes memory signature) = _parsePaymasterAndData(userOp.paymasterAndData);
 
         // Only support 65-byte signatures, to avoid potential replay attacks.
         if (signature.length != 65) {
@@ -162,53 +167,82 @@ contract VerifyingPaymaster is BasePaymaster {
             _performPrechecks(userOp, paymasterData, maxCost);
         }
 
-        return (_packContextData(userOp, userOpHash, paymasterData), _packValidationData(false, paymasterData.validUntil, paymasterData.validAfter));
+        return (
+            _packContextData(userOp, userOpHash, paymasterData),
+            _packValidationData(false, paymasterData.validUntil, paymasterData.validAfter)
+        );
     }
 
-    /// @notice validate signature
-    function _validateSignature(UserOperation calldata userOp, PaymasterData memory paymasterData, bytes memory signature) internal view returns (bool) {
+    /// @notice validate signature on userOp paymasterAndData
+    function _validateSignature(
+        UserOperation calldata userOp,
+        PaymasterData memory paymasterData,
+        bytes memory signature
+    )
+        internal
+        view
+        returns (bool)
+    {
         bytes32 hash = ECDSA.toEthSignedMessageHash(getHash(userOp, paymasterData));
         return verifyingSigner == ECDSA.recover(hash, signature);
     }
 
-    /// @notice perfrom any prechecks required
-    function _performPrechecks(UserOperation calldata userOp, PaymasterData memory paymasterData, uint256 maxCost) internal view {
+    /// @notice perfrom balance and/or allowance checks
+    function _performPrechecks(
+        UserOperation calldata userOp,
+        PaymasterData memory paymasterData,
+        uint256 maxCost
+    )
+        internal
+        view
+    {
         uint256 maxTokenCost = _calculateTokenCost(maxCost, paymasterData.exchangeRate);
         if (paymasterData.preCheckBalance) {
             uint256 balance = IERC20(paymasterData.token).balanceOf(userOp.sender);
             if (balance < maxTokenCost) {
-                revert SenderTokenBalanceTooLow(paymasterData.token, balance, maxTokenCost);   
+                revert SenderTokenBalanceTooLow(paymasterData.token, balance, maxTokenCost);
             }
         }
 
         if (paymasterData.preCheckAllowance) {
             uint256 allowance = IERC20(paymasterData.token).allowance(userOp.sender, address(this));
             if (allowance < maxTokenCost) {
-                revert SenderTokenApprovalTooLow(paymasterData.token, allowance, maxTokenCost);   
+                revert SenderTokenApprovalTooLow(paymasterData.token, allowance, maxTokenCost);
             }
         }
     }
 
     /// @notice Pack the context data for postOp
-    function _packContextData(UserOperation calldata userOp, bytes32 userOpHash, PaymasterData memory paymasterData) internal pure returns (bytes memory) {
+    function _packContextData(
+        UserOperation calldata userOp,
+        bytes32 userOpHash,
+        PaymasterData memory paymasterData
+    )
+        internal
+        pure
+        returns (bytes memory)
+    {
         return abi.encode(
-            userOp.maxFeePerGas, 
-            userOp.maxPriorityFeePerGas, 
-            userOp.sender, 
-            userOpHash, 
-            paymasterData.sponsorId, 
-            paymasterData.allowAnyBundler, 
-            paymasterData.token, 
-            paymasterData.receiver, 
+            userOp.maxFeePerGas,
+            userOp.maxPriorityFeePerGas,
+            userOp.sender,
+            userOpHash,
+            paymasterData.sponsorId,
+            paymasterData.allowAnyBundler,
+            paymasterData.token,
+            paymasterData.receiver,
             paymasterData.exchangeRate
         );
     }
 
     /// @notice Unpack the paymasterAndData field
     ///
-    /// @param paymasterAndData - paymasterAndData field
-    function parsePaymasterAndData(bytes calldata paymasterAndData)
-    internal pure returns(PaymasterData memory paymasterData, bytes calldata signature) {
+    /// @param paymasterAndData - paymasterAndData field from userOp
+    function _parsePaymasterAndData(bytes calldata paymasterAndData)
+        internal
+        pure
+        returns (PaymasterData memory paymasterData, bytes calldata signature)
+    {
         paymasterData.validUntil = uint48(bytes6(paymasterAndData[20:26]));
         paymasterData.validAfter = uint48(bytes6(paymasterAndData[26:32]));
         paymasterData.sponsorId = uint128(bytes16(paymasterAndData[32:48]));
@@ -242,7 +276,7 @@ contract VerifyingPaymaster is BasePaymaster {
     /// @notice Renouce is disabled for this contract
     ///
     /// @dev Reverts if called.
-    function renounceOwnership() public override view onlyOwner {
+    function renounceOwnership() public view override onlyOwner {
         revert FunctionDisabled();
     }
 
@@ -274,7 +308,7 @@ contract VerifyingPaymaster is BasePaymaster {
         bundlerAllowed[bundler] = false;
     }
 
-     /// @notice Add pending verifying signer.
+    /// @notice Add pending verifying signer.
     ///
     /// @param signer Address of new signer to rotate to.
     function setPendingVerifyingSigner(address signer) external onlyOwner {
@@ -284,8 +318,8 @@ contract VerifyingPaymaster is BasePaymaster {
 
     /// @notice Rotate verifying signer.
     function rotateVerifyingSigner() external onlyOwner {
-        if (pendingVerifyingSigner == address(0)){
-             revert NoPendingSigner();
+        if (pendingVerifyingSigner == address(0)) {
+            revert NoPendingSigner();
         }
         emit VerifyingSignerRotated(verifyingSigner, pendingVerifyingSigner);
         verifyingSigner = pendingVerifyingSigner;
@@ -323,7 +357,7 @@ contract VerifyingPaymaster is BasePaymaster {
     /// @notice Receive Eth and deposit it into the entrypoint
     receive() external payable {
         // use address(this).balance rather than msg.value in case of force-send
-        (bool callSuccess, ) = payable(address(entryPoint)).call{value: address(this).balance}("");
+        (bool callSuccess,) = payable(address(entryPoint)).call{ value: address(this).balance }("");
         if (!callSuccess) {
             revert DespositFailed();
         }

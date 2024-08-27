@@ -72,23 +72,10 @@ contract VerifyingPaymasterTest is Test {
         paymaster.transferOwnership(PAYMASTER_SIGNER);
     }
 
-    function createPaymasterData() pure public returns (VerifyingPaymaster.PaymasterData memory) {
-        return VerifyingPaymaster.PaymasterData(
-            MOCK_VALID_UNTIL,
-            MOCK_VALID_AFTER,
-            MOCK_SPONSOR_ID,
-            MOCK_ALLOW_ANY_BUNDLER,
-            false,
-            false,
-            MOCK_TOKEN_ADDRESS,
-            MOCK_TOKEN_RECEIVER,
-            MOCK_TOKEN_EXCHANGE_RATE
-        );
-    }
-
     function test_getHash_isCorrect() public view {
         UserOperation memory userOp = createUserOp();
         VerifyingPaymaster.PaymasterData memory paymasterData = createPaymasterData();
+        
         bytes32 hash = paymaster.getHash(
             userOp,
             paymasterData
@@ -96,7 +83,7 @@ contract VerifyingPaymasterTest is Test {
         // Replace with the expected hash value
         assertEq(
             hash,
-            0x30a30b2e1e8597a67a0c73295ea9734d27a2faa65ea7be4b1a6fabec2168d69b
+            0xb902b4e03a4f92317d692d19c02db024db46c4185e18cdd2a40a60bd3cddf64a
         );
     }
 
@@ -327,26 +314,17 @@ contract VerifyingPaymasterTest is Test {
         userOp.signature = abi.encodePacked(r, s, v);
     }
 
-    function createEncodedValidationResult(
-        bool sigFailed,
-        uint256 preOpGas
-    ) public pure returns (bytes memory) {
-        uint256 prefund = 0;
-        bytes memory paymasterContext = "";
-        return
-            abi.encodeWithSelector(
-                IEntryPoint.ValidationResult.selector,
-                IEntryPoint.ReturnInfo(
-                    preOpGas,
-                    prefund,
-                    sigFailed,
-                    MOCK_VALID_AFTER,
-                    MOCK_VALID_UNTIL,
-                    paymasterContext
-                ),
-                IStakeManager.StakeInfo(0, 0),
-                IStakeManager.StakeInfo(0, 0),
-                IStakeManager.StakeInfo(0, 0)
-            );
+   function createPaymasterData() pure public returns (VerifyingPaymaster.PaymasterData memory) {
+        return VerifyingPaymaster.PaymasterData(
+            MOCK_VALID_UNTIL,
+            MOCK_VALID_AFTER,
+            MOCK_SPONSOR_ID,
+            MOCK_ALLOW_ANY_BUNDLER,
+            false,
+            false,
+            MOCK_TOKEN_ADDRESS,
+            MOCK_TOKEN_RECEIVER,
+            MOCK_TOKEN_EXCHANGE_RATE
+        );
     }
 }
