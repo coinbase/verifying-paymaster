@@ -111,7 +111,7 @@ contract VerifyingPaymaster is BasePaymaster {
             revert InvalidParam("entryPoint is not a contract");
         }
 
-        if (_verifyingSigner == msg.sender) {
+        if (_verifyingSigner == _initialOwner) {
             revert InvalidParam("verifyingSigner cannot be the owner");
         }
 

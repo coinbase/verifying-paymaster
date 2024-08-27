@@ -26,6 +26,7 @@ contract VerifyingPaymasterTest is Test {
     address constant MOCK_TOKEN_RECEIVER = address(0x5678);
     uint256 constant MOCK_TOKEN_EXCHANGE_RATE = 1e18;
     bytes constant MOCK_SIG = "0x1234";
+    bytes32 constant MOCK_HASH = bytes32(0);
     address constant PAYMASTER_SIGNER =
         0xC3Bf2750F0d47098f487D45b2FB26b32eCbAf9a2;
     uint256 constant PAYMASTER_SIGNER_KEY =
@@ -47,12 +48,12 @@ contract VerifyingPaymasterTest is Test {
     }
 
     function test_constructor_reverts_whenOwnerIsVerifyingSigner() public {
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(VerifyingPaymaster.InvalidParam.selector, "verifyingSigner cannot be the owner"));
         new VerifyingPaymaster(entrypoint, address(this), address(this));
     }
 
     function test_constructor_reverts_whenEntryPointNotAContract() public {
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(VerifyingPaymaster.InvalidParam.selector, "entryPoint is not a contract"));
         new VerifyingPaymaster(IEntryPoint(address(0x1234)), PAYMASTER_SIGNER, address(this));
     }
 
@@ -62,16 +63,16 @@ contract VerifyingPaymasterTest is Test {
     }
 
     function test_transferOwnership_reverts_ifZeroAddress() public {
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(VerifyingPaymaster.InvalidParam.selector, "newOwner cannot be address(0)"));
         paymaster.transferOwnership(address(0));
     }
 
     function test_transferOwnership_reverts_ifAddressIsAlsoVerifyingSigner() public {
-        vm.expectRevert();
+        vm.expectRevert(abi.encodeWithSelector(VerifyingPaymaster.InvalidParam.selector, "newOwner cannot be the verifyingSigner"));
         paymaster.transferOwnership(PAYMASTER_SIGNER);
     }
 
-    function createPaymasterData() public returns (VerifyingPaymaster.PaymasterData memory) {
+    function createPaymasterData() pure public returns (VerifyingPaymaster.PaymasterData memory) {
         return VerifyingPaymaster.PaymasterData(
             MOCK_VALID_UNTIL,
             MOCK_VALID_AFTER,
@@ -85,7 +86,7 @@ contract VerifyingPaymasterTest is Test {
         );
     }
 
-    function test_getHash() public {
+    function test_getHash_isCorrect() public view {
         UserOperation memory userOp = createUserOp();
         VerifyingPaymaster.PaymasterData memory paymasterData = createPaymasterData();
         bytes32 hash = paymaster.getHash(
@@ -99,17 +100,19 @@ contract VerifyingPaymasterTest is Test {
         );
     }
 
-    function test_validate_success_whenUserOpValidSignature() public {
+    function test_validatePaymasterUserOp_success_whenUserOpValidSignature() public {
         UserOperation memory userOp = createUserOp();
         addPaymasterData(userOp, true, address(0));
         signUserOp(userOp);
 
-        // Encode and expect the validation result
-        vm.expectRevert(); //createEncodedValidationResult(false, 53025) sig success
-        entrypoint.simulateValidation(userOp);
+        vm.prank(address(entrypoint));
+        (bytes memory context, uint256 validationData) = paymaster.validatePaymasterUserOp(userOp, MOCK_HASH , 256);
+        uint256 sigFailed = 1 & validationData;
+        assertEq(sigFailed, 0, "First bit should be 0 to represent sig success");
+        assertFalse(context.length == 0, "Should not be an empty context");
     }
 
-    function test_validate_reverts_WhenUserOpHasWrongSigner() public {
+    function test_validatePaymasterUserOp_reverts_WhenUserOpHasWrongSigner() public {
         UserOperation memory userOp = createUserOp();
         VerifyingPaymaster.PaymasterData memory paymasterData = createPaymasterData();
 
@@ -138,12 +141,14 @@ contract VerifyingPaymasterTest is Test {
             v
         );
         signUserOp(userOp);
-
-        vm.expectRevert(); //createEncodedValidationResult(true, 53035) sig failed
-        entrypoint.simulateValidation(userOp);
+        vm.prank(address(entrypoint));
+        (bytes memory context, uint256 validationData) = paymaster.validatePaymasterUserOp(userOp, MOCK_HASH , 256);
+        uint256 sigFailed = 1 & validationData;
+        assertEq(sigFailed, 1, "First bit should be 1 to represent sig failed");
+        assertEq(context.length, 0, "Should be empty context");
     }
 
-    function test_validatePaymaster_reverts_whenUserOpHasNoSignature() public {
+    function test_validatePaymasterUserOp_reverts_whenUserOpHasNoSignature() public {
         UserOperation memory userOp = createUserOp();
         
         userOp.paymasterAndData = abi.encodePacked(
@@ -153,17 +158,20 @@ contract VerifyingPaymasterTest is Test {
                 MOCK_VALID_AFTER,
                 MOCK_SPONSOR_ID,
                 MOCK_ALLOW_ANY_BUNDLER,
+                false,
+                false,
                 MOCK_TOKEN_ADDRESS,
                 MOCK_TOKEN_RECEIVER,
                 MOCK_TOKEN_EXCHANGE_RATE
             )
         );
         signUserOp(userOp);
-        vm.expectRevert(); // "AA33 reverted: Paymaster: invalid signature length in paymasterAndData"
-        entrypoint.simulateValidation(userOp);
+        vm.prank(address(entrypoint));
+        vm.expectRevert(abi.encodeWithSelector(VerifyingPaymaster.InvalidParam.selector, "invalid signature length in paymasterAndData"));
+        paymaster.validatePaymasterUserOp(userOp, MOCK_HASH , 256);
     }
 
-    function test_validate_reverts_whenUserOpHasInvalidSignature() public {
+    function test_validatePaymasterUserOp_reverts_whenUserOpHasInvalidSignature() public {
         UserOperation memory userOp = createUserOp();
         userOp.paymasterAndData = abi.encodePacked(
             address(paymaster),
@@ -172,6 +180,8 @@ contract VerifyingPaymasterTest is Test {
                 MOCK_VALID_AFTER,
                 MOCK_SPONSOR_ID,
                 MOCK_ALLOW_ANY_BUNDLER,
+                false,
+                false,
                 MOCK_TOKEN_ADDRESS,
                 MOCK_TOKEN_RECEIVER,
                 MOCK_TOKEN_EXCHANGE_RATE
@@ -182,14 +192,13 @@ contract VerifyingPaymasterTest is Test {
         );
         signUserOp(userOp);
 
-        vm.expectRevert(); // "AA33 reverted: ECDSA: invalid signature"
-        entrypoint.simulateValidation(userOp);
+        vm.prank(address(entrypoint));
+        vm.expectRevert("ECDSA: invalid signature");
+        paymaster.validatePaymasterUserOp(userOp, MOCK_HASH , 256);
     }
 
     // Non-erc20 sponsorship
-    function test_entrypointHandleOps_successForStandardSponsorship() public {
-        address(paymaster).call{value: 1 ether}("");
-        
+    function test_entrypointHandleOps_successForStandardSponsorship() public {        
         UserOperation memory userOp = createUserOp();
         addPaymasterData(userOp, true, address(0));
         signUserOp(userOp);
@@ -200,8 +209,6 @@ contract VerifyingPaymasterTest is Test {
     }
 
     function test_entrypointHandleOps_successForERC20Sponsorship() public {
-        address(paymaster).call{value: 1 ether}("");
-
         uint256 initialBalance = mockToken.balanceOf(MOCK_TOKEN_RECEIVER);
         UserOperation memory userOp = createUserOp();
         bytes memory approveCallData = abi.encodeWithSelector(
@@ -227,8 +234,6 @@ contract VerifyingPaymasterTest is Test {
     }
 
     function test_entrypointHandleOps_failedERC20Transfer_DoesNotRevert() public {
-        address(paymaster).call{value: 1 ether}("");
-
         uint256 initialBalance = mockToken.balanceOf(MOCK_TOKEN_RECEIVER);
 
         UserOperation memory userOp = createUserOp();
@@ -280,7 +285,7 @@ contract VerifyingPaymasterTest is Test {
         return userOp;
     }
 
-    function addPaymasterData(UserOperation memory userOp, bool anyBundler, address token) public {
+    function addPaymasterData(UserOperation memory userOp, bool anyBundler, address token) public view {
         VerifyingPaymaster.PaymasterData memory paymasterData = createPaymasterData();
         paymasterData.allowAnyBundler = anyBundler;
         paymasterData.token = token;
