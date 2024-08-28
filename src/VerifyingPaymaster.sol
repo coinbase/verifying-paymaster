@@ -82,7 +82,7 @@ contract VerifyingPaymaster is BasePaymaster {
     error SenderTokenApprovalTooLow(address token, uint256 approval, uint256 maxTokenCost);
 
     /// @notice Error for bundler not allowed
-    error BundlerNowAllowed();
+    error BundlerNotAllowed();
 
     /// @notice Error for calling a disabled function
     error FunctionDisabled();
@@ -260,7 +260,7 @@ contract VerifyingPaymaster is BasePaymaster {
         ContextData memory c = abi.decode(context, (ContextData));
 
         if (!c.allowAnyBundler && !bundlerAllowed[tx.origin]) {
-            revert BundlerNowAllowed();
+            revert BundlerNotAllowed();
         }
 
         if (c.token != address(0) && mode != PostOpMode.postOpReverted) {
