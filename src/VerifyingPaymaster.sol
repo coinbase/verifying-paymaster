@@ -154,10 +154,6 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
             revert InvalidParam("entryPoint is not a contract");
         }
 
-        if (verifyingSigner == initialOwner) {
-            revert InvalidParam("verifyingSigner cannot be the owner");
-        }
-
         _transferOwnership(initialOwner);
         verifyingSigner = initialVerifyingSigner;
     }
@@ -208,7 +204,8 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
 
         // Check signature is correct
         bytes32 hash = ECDSA.toEthSignedMessageHash(getHash(userOp, paymasterData));
-        if (verifyingSigner != ECDSA.recover(hash, signature)) {
+        address signedBy = ECDSA.recover(hash, signature);
+        if(signedBy != verifyingSigner || signedBy != pendingVerifyingSigner) {
             return ("", _packValidationData(true, paymasterData.validUntil, paymasterData.validAfter));
         }
 
