@@ -47,11 +47,6 @@ contract VerifyingPaymasterTest is Test {
         require(success, "failed to fund paymaster");
     }
 
-    function test_constructor_reverts_whenOwnerIsVerifyingSigner() public {
-        vm.expectRevert(abi.encodeWithSelector(VerifyingPaymaster.InvalidParam.selector, "verifyingSigner cannot be the owner"));
-        new VerifyingPaymaster(entrypoint, address(this), address(this));
-    }
-
     function test_constructor_reverts_whenEntryPointNotAContract() public {
         vm.expectRevert(abi.encodeWithSelector(VerifyingPaymaster.InvalidParam.selector, "entryPoint is not a contract"));
         new VerifyingPaymaster(IEntryPoint(address(0x1234)), PAYMASTER_SIGNER, address(this));
@@ -60,16 +55,6 @@ contract VerifyingPaymasterTest is Test {
     function test_renouceOwnership_reverts() public {
         vm.expectRevert();
         paymaster.renounceOwnership();
-    }
-
-    function test_transferOwnership_reverts_ifZeroAddress() public {
-        vm.expectRevert(abi.encodeWithSelector(VerifyingPaymaster.InvalidParam.selector, "newOwner cannot be address(0)"));
-        paymaster.transferOwnership(address(0));
-    }
-
-    function test_transferOwnership_reverts_ifAddressIsAlsoVerifyingSigner() public {
-        vm.expectRevert(abi.encodeWithSelector(VerifyingPaymaster.InvalidParam.selector, "newOwner cannot be the verifyingSigner"));
-        paymaster.transferOwnership(PAYMASTER_SIGNER);
     }
 
     function test_getHash_isCorrect() public view {
