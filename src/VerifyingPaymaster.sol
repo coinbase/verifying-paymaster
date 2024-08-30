@@ -16,28 +16,6 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     using UserOperationLib for UserOperation;
     using SafeERC20 for IERC20;
 
-    /// @notice Context passed to postOp
-    struct PostOpContextData {
-        /// @dev MaxFeePerGas from userOp
-        uint256 maxFeePerGas;
-        /// @dev MaxPriorityFeePerGas from userOp
-        uint256 maxPriorityFeePerGas;
-        /// @dev UserOp sender
-        address sender;
-        /// @dev Hash of the userOp
-        bytes32 userOpHash;
-        /// @dev Sponsor uuid for offchain tracking
-        uint128 sponsorUUID;
-        /// @dev Flag to abort bundle in postOp if submitted by unallowlisted bundler
-        bool allowAnyBundler;
-        /// @dev Token to use for payment or address(0) if no token required
-        address token;
-        /// @dev Token payment sent to this address
-        address receiver;
-        /// @dev Exchange rate for the token
-        uint256 exchangeRate;
-    }
-
     /// @notice Paymaster data from the user operation
     struct PaymasterData {
         /// @dev Signature is valid until
@@ -49,19 +27,40 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         /// @dev Flag to reject userOp in postOp if submitted by unallowlisted bundler
         bool allowAnyBundler;
         /// @dev Flag to check sender token balance in validation phase
-        bool preCheckBalance;
-        /// @dev Flag to check if sender has approved this paymaster in validation phase
-        bool preCheckAllowance;
+        bool precheckBalance;
+        /// @dev Flag to require token payment in validation phase
+        bool prepaymentRequired;
         /// @dev Token to use for payment
         address token;
         /// @dev Token payment sent to this address
         address receiver;
         /// @dev Exchange rate for the token
         uint256 exchangeRate;
+        /// @dev Post op gas cost if using token
+        uint48 postOpGasCost;
     }
 
-    /// @notice PostOp gas overhead for token transfer fees
-    uint256 public constant POST_OP_GAS_OVERHEAD = 24_000;
+    /// @notice Context passed to postOp
+    struct PostOpContextData {
+        /// @dev UserOp sender
+        address sender;
+        /// @dev Hash of the userOp
+        bytes32 userOpHash;
+        /// @dev Sponsor uuid for offchain tracking
+        uint128 sponsorUUID;
+        /// @dev Flag to abort bundle in postOp if submitted by unallowlisted bundler
+        bool allowAnyBundler;
+        /// @dev Prepaid token amount during validation
+        uint256 prepaidAmount;
+        /// @dev Overhead fee for postOp
+        uint256 postOpOverheadFee;
+        /// @dev Token to use for payment or address(0) if no token required
+        address token;
+        /// @dev Token payment sent to this address
+        address receiver;
+        /// @dev Exchange rate for the token
+        uint256 exchangeRate;
+    }
 
     /// @notice The address to verify the signature against
     address public verifyingSigner;
@@ -119,13 +118,6 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     /// @param maxTokenCost Maximum token cost
     error SenderTokenBalanceTooLow(address token, uint256 balance, uint256 maxTokenCost);
 
-    /// @notice Error for not having the paymaster approved during prevalidation
-    ///
-    /// @param token Token address
-    /// @param approval Amount approved for the paymaster to withdraw
-    /// @param maxTokenCost Maximum token cost
-    error SenderTokenApprovalTooLow(address token, uint256 approval, uint256 maxTokenCost);
-
     /// @notice Error for bundler not allowed
     error BundlerNotAllowed();
 
@@ -158,6 +150,100 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         verifyingSigner = initialVerifyingSigner;
     }
 
+    /// @inheritdoc BasePaymaster
+    function _validatePaymasterUserOp(
+        UserOperation calldata userOp,
+        bytes32 userOpHash,
+        uint256 maxCost
+    )
+        internal
+        override
+        returns (bytes memory context, uint256 validationData)
+    {
+        (PaymasterData memory paymasterData, bytes memory signature) = _parsePaymasterAndData(userOp.paymasterAndData);
+
+        // Only support 65-byte signatures, to avoid potential replay attacks.
+        if (signature.length != 65) {
+            revert InvalidParam("invalid signature length in paymasterAndData");
+        }
+
+        // Check signature is correct
+        bytes32 hash = ECDSA.toEthSignedMessageHash(getHash(userOp, paymasterData));
+        address signedBy = ECDSA.recover(hash, signature);
+        if (signedBy != verifyingSigner && signedBy != pendingVerifyingSigner) {
+            return ("", _packValidationData(true, paymasterData.validUntil, paymasterData.validAfter));
+        }
+
+        // Init postOpContext
+        PostOpContextData memory postOpContext = PostOpContextData({
+            sender: userOp.sender,
+            userOpHash: userOpHash,
+            sponsorUUID: paymasterData.sponsorUUID,
+            allowAnyBundler: paymasterData.allowAnyBundler,
+            prepaidAmount: 0,
+            postOpOverheadFee: 0,
+            token: paymasterData.token,
+            receiver: paymasterData.receiver,
+            exchangeRate: paymasterData.exchangeRate
+        });
+
+        // Perform additional token logic
+        if (paymasterData.token != address(0)) {
+            uint256 gasPrice = _min(userOp.maxFeePerGas, userOp.maxPriorityFeePerGas + block.basefee);
+            postOpContext.postOpOverheadFee = (paymasterData.postOpGasCost * gasPrice);
+            if (paymasterData.precheckBalance || paymasterData.prepaymentRequired) {
+                uint256 maxTokenCost =
+                    _calculateTokenCost(maxCost + postOpContext.postOpOverheadFee, paymasterData.exchangeRate);
+
+                // Optionally check if sender has enough token balance if prepayment isnt required
+                if (paymasterData.precheckBalance) {
+                    uint256 balance = IERC20(paymasterData.token).balanceOf(userOp.sender);
+                    if (balance < maxTokenCost) {
+                        revert SenderTokenBalanceTooLow(paymasterData.token, balance, maxTokenCost);
+                    }
+                }
+
+                // Optionally require prepayment upfront with cost difference to be refunded postOp
+                if (paymasterData.prepaymentRequired) {
+                    // attempt transfer, safe transfer will revert on failure and fail validation for userOp
+                    IERC20(paymasterData.token).safeTransferFrom(userOp.sender, address(this), maxTokenCost);
+                    postOpContext.prepaidAmount = maxTokenCost;
+                }
+            }
+        }
+
+        // All checks have passed, prepare our postOp context data and return successfully
+        return (abi.encode(postOpContext), _packValidationData(false, paymasterData.validUntil, paymasterData.validAfter));
+    }
+
+    /// @inheritdoc BasePaymaster
+    function _postOp(PostOpMode mode, bytes calldata context, uint256 actualGasCost) internal override {
+        PostOpContextData memory c = abi.decode(context, (PostOpContextData));
+
+        // Reject if should restrict bundlers and bundler not on allowlist to prevent siphoning of funds
+        if (!c.allowAnyBundler && !bundlerAllowed[tx.origin]) {
+            revert BundlerNotAllowed();
+        }
+
+        // Attempt transfer if token is set and not mode not postOpReverted
+        if (c.token != address(0) && mode != PostOpMode.postOpReverted) {
+            // get current gas price and token cost
+            uint256 actualTokenCost = _calculateTokenCost(actualGasCost + c.postOpOverheadFee, c.exchangeRate);
+
+            // If not prepaid transfer full amount to receiver else refund sender difference and transfer to receiver
+            if (c.prepaidAmount == 0) {
+                IERC20(c.token).safeTransferFrom(c.sender, c.receiver, actualTokenCost);
+            } else {
+                IERC20(c.token).safeTransfer(c.sender, c.prepaidAmount - actualTokenCost);
+                IERC20(c.token).safeTransfer(c.receiver, actualTokenCost);
+            }
+
+            emit UserOperationSponsoredWithERC20(c.userOpHash, c.sponsorUUID, c.token, c.receiver, actualTokenCost);
+        } else {
+            emit UserOperationSponsored(c.userOpHash, c.sponsorUUID, c.token);
+        }
+    }
+
     /// @notice Get the hash of the UserOperation and relavant paymaster data
     ///
     /// @param userOp UserOperation struct
@@ -184,91 +270,6 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         );
     }
 
-    /// @inheritdoc BasePaymaster
-    function _validatePaymasterUserOp(
-        UserOperation calldata userOp,
-        bytes32 userOpHash,
-        uint256 maxCost
-    )
-        internal
-        view
-        override
-        returns (bytes memory context, uint256 validationData)
-    {
-        (PaymasterData memory paymasterData, bytes memory signature) = _parsePaymasterAndData(userOp.paymasterAndData);
-
-        // Only support 65-byte signatures, to avoid potential replay attacks.
-        if (signature.length != 65) {
-            revert InvalidParam("invalid signature length in paymasterAndData");
-        }
-
-        // Check signature is correct
-        bytes32 hash = ECDSA.toEthSignedMessageHash(getHash(userOp, paymasterData));
-        address signedBy = ECDSA.recover(hash, signature);
-        if(signedBy != verifyingSigner || signedBy != pendingVerifyingSigner) {
-            return ("", _packValidationData(true, paymasterData.validUntil, paymasterData.validAfter));
-        }
-
-        // Perform any flagged prechecks if token is used
-        if (paymasterData.token != address(0) && (paymasterData.preCheckBalance || paymasterData.preCheckAllowance)) {
-            uint256 maxTokenCost = _calculateTokenCost(maxCost, paymasterData.exchangeRate);
-
-            // Optionally check if sender has enough token balance. Should be true outside of auxillary funds (ie. Magic spend).
-            if (paymasterData.preCheckBalance) {
-                uint256 balance = IERC20(paymasterData.token).balanceOf(userOp.sender);
-                if (balance < maxTokenCost) {
-                    revert SenderTokenBalanceTooLow(paymasterData.token, balance, maxTokenCost);
-                }
-            }
-
-            // Optionally check if sender has approved paymaster. Should be true to prevent front running unless approval in
-            // userOp.
-            if (paymasterData.preCheckAllowance) {
-                uint256 allowance = IERC20(paymasterData.token).allowance(userOp.sender, address(this));
-                if (allowance < maxTokenCost) {
-                    revert SenderTokenApprovalTooLow(paymasterData.token, allowance, maxTokenCost);
-                }
-            }
-        }
-
-        // All checks have passed, prepare our postOp context data and return successfully
-        return (
-            _packPostOpContextData(userOp, userOpHash, paymasterData),
-            _packValidationData(false, paymasterData.validUntil, paymasterData.validAfter)
-        );
-    }
-
-    /// @notice Pack the context data for postOp
-    ///
-    /// @param userOp The user operation.
-    /// @param userOpHash Hash of the user operation
-    /// @param paymasterData PaymasterData struct
-    ///
-    /// @return bytes encoded PostOpContextData struct for use in postOp
-    function _packPostOpContextData(
-        UserOperation calldata userOp,
-        bytes32 userOpHash,
-        PaymasterData memory paymasterData
-    )
-        internal
-        pure
-        returns (bytes memory)
-    {
-        return abi.encode(
-            PostOpContextData({
-                maxFeePerGas: userOp.maxFeePerGas,
-                maxPriorityFeePerGas: userOp.maxPriorityFeePerGas,
-                sender: userOp.sender,
-                userOpHash: userOpHash,
-                sponsorUUID: paymasterData.sponsorUUID,
-                allowAnyBundler: paymasterData.allowAnyBundler,
-                token: paymasterData.token,
-                receiver: paymasterData.receiver,
-                exchangeRate: paymasterData.exchangeRate
-            })
-        );
-    }
-
     /// @notice Unpack the paymasterAndData field
     ///
     /// @param paymasterAndData PaymasterAndData field from userOp
@@ -284,35 +285,13 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         paymasterData.validAfter = uint48(bytes6(paymasterAndData[26:32]));
         paymasterData.sponsorUUID = uint128(bytes16(paymasterAndData[32:48]));
         paymasterData.allowAnyBundler = paymasterAndData[48] > 0;
-        paymasterData.preCheckBalance = paymasterAndData[49] > 0;
-        paymasterData.preCheckAllowance = paymasterAndData[50] > 0;
+        paymasterData.precheckBalance = paymasterAndData[49] > 0;
+        paymasterData.prepaymentRequired = paymasterAndData[50] > 0;
         paymasterData.token = address(bytes20(paymasterAndData[51:71]));
         paymasterData.receiver = address(bytes20(paymasterAndData[71:91]));
         paymasterData.exchangeRate = uint256(bytes32(paymasterAndData[91:123]));
-        signature = paymasterAndData[123:];
-    }
-
-    /// @inheritdoc BasePaymaster
-    function _postOp(PostOpMode mode, bytes calldata context, uint256 actualGasCost) internal override {
-        PostOpContextData memory c = abi.decode(context, (PostOpContextData));
-
-        // Reject if should restrict bundlers and bundler not on allowlist to prevent siphoning of funds
-        if (!c.allowAnyBundler && !bundlerAllowed[tx.origin]) {
-            revert BundlerNotAllowed();
-        }
-
-        // Attempt transfer if token is set and not mode not postOpReverted
-        if (c.token != address(0) && mode != PostOpMode.postOpReverted) {
-            // get current gas price and token cost
-            uint256 gasPrice = _min(c.maxFeePerGas, c.maxPriorityFeePerGas + block.basefee);
-            uint256 actualTokenCost = _calculateTokenCost((actualGasCost + (POST_OP_GAS_OVERHEAD * gasPrice)), c.exchangeRate);
-
-            // attempt transfer, safe transfer will revert on failure and fail userOp
-            IERC20(c.token).safeTransferFrom(c.sender, c.receiver, actualTokenCost);
-            emit UserOperationSponsoredWithERC20(c.userOpHash, c.sponsorUUID, c.token, c.receiver, actualTokenCost);
-        } else {
-            emit UserOperationSponsored(c.userOpHash, c.sponsorUUID, c.token);
-        }
+        paymasterData.postOpGasCost = uint48(bytes6(paymasterAndData[123:129]));
+        signature = paymasterAndData[129:];
     }
 
     /// @notice Renouce is disabled for this contract
