@@ -11,10 +11,13 @@ This contract is used as the Coinbase Developer Platform Paymaster for standard 
 ## Features
 
 - Signature-based validation of user operations
-- Optional balance and allowance prechecks for ERC20 tokens
+- Optional balance precheck for ERC20 tokens
+- Optional prepayment in validation phase
 - Support for sponsoring user operations with or without token transfers
-- Configurable bundler restrictions
+- Configurable bundler restrictions 
 - Owner-controlled management of bundler allowlist and verifying signer
+
+View more information in the docs(./docs/README.md)
 
 ## ERC-4337 Overview
 
