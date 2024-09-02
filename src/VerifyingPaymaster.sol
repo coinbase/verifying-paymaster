@@ -71,7 +71,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     address public pendingVerifyingSigner;
 
     /// @notice Allowlist of bundlers to use if restricting bundlers is enabled by flag
-    mapping(address bundler => bool allowed) public bundlerAllowed;
+    mapping(address bundler => bool allowed) public isBundlerAllowed;
 
     /// @notice Event for a sponsored user operation without a token payment (could be an unsuccessful transfer)
     ///
@@ -166,7 +166,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     ///
     /// @param bundler Bundler address
     function updateBundlerAllowlist(address bundler, bool allowed) external onlyOwner {
-        bundlerAllowed[bundler] = allowed;
+        isBundlerAllowed[bundler] = allowed;
         emit BundlerAllowlistUpdated(bundler, allowed);
     }
 
@@ -311,7 +311,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         PostOpContextData memory c = abi.decode(context, (PostOpContextData));
 
         // Reject if should restrict bundlers and bundler not on allowlist to prevent siphoning of funds
-        if (!c.allowAnyBundler && !bundlerAllowed[tx.origin]) {
+        if (!c.allowAnyBundler && !isBundlerAllowed[tx.origin]) {
             revert BundlerNotAllowed();
         }
 
