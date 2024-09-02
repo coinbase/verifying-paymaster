@@ -12,6 +12,7 @@ import {SimpleAccount} from "@account-abstraction/samples/SimpleAccount.sol";
 import {MockERC20} from "./MockERC20.sol"; // Include the mock ERC20 token contract
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 
+/// @fix would prefer to have tests isolated per function and one integration test file
 contract VerifyingPaymasterTest is Test {
     EntryPoint public entrypoint;
     VerifyingPaymaster public paymaster;

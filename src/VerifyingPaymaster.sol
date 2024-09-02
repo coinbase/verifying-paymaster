@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: GPL-3.0
 pragma solidity ^0.8.23;
 
+/// @fix name imports
 import "@account-abstraction/core/BasePaymaster.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
+/// @fix title should match contract name so should we just make both CoinbaseVerifyingPaymaster?
 /// @title Coinbase Developer Platform Paymaster
 ///
 /// @notice ERC4337 Paymaster implementation compatible with Entrypoint v0.6.
 ///
 /// @dev See https://eips.ethereum.org/EIPS/eip-4337#extension-paymasters.
+/// @fix author coinbase with repo link
 contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     using UserOperationLib for UserOperation;
     using SafeERC20 for IERC20;
@@ -68,6 +71,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     /// @notice Pending verifyingSigner for a two-step rotation of the verifying signer
     address public pendingVerifyingSigner;
 
+    /// @fix nit: rename `isBundlerAllowed`
     /// @notice Allowlist of bundlers to use if restricting bundlers is enabled by flag
     mapping(address bundler => bool allowed) public bundlerAllowed;
 
@@ -75,6 +79,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     ///
     /// @param userOperationHash Hash of the user operation.
     /// @param sponsorUUID Sponsor UUID for offchain tracking
+    /// @fix weird that we have two events for the erc20 case?
     /// @param token Token address, will be address(0) for standard sponsorship and a valid token address on failed transfer
     event UserOperationSponsored(bytes32 indexed userOperationHash, uint128 indexed sponsorUUID, address token);
 
@@ -109,6 +114,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     /// @notice Error for invalid parameters
     ///
     /// @param errorMessage Error message for the param
+    /// @fix are we parsing these strings back up for the API to give an error message? It's kind of against why we would have dedicated and types errors to just dump a general message.
     error InvalidParam(string errorMessage);
 
     /// @notice Error for not holding enough balance during prevalidation
@@ -119,9 +125,11 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     error SenderTokenBalanceTooLow(address token, uint256 balance, uint256 maxTokenCost);
 
     /// @notice Error for bundler not allowed
+    /// @fix add param for attempted bundler address
     error BundlerNotAllowed();
 
     /// @notice Error for calling a disabled function
+    /// @fix can we make this specific to renounceOwnership because that's the only function using this?
     error FunctionDisabled();
 
     /// @notice Error for deposit failure
@@ -146,10 +154,12 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
             revert InvalidParam("entryPoint is not a contract");
         }
 
+        /// @fix if we construct with normal Ownable, we get this for free and with non-zero address check. 
         _transferOwnership(initialOwner);
         verifyingSigner = initialVerifyingSigner;
     }
 
+    /// @fix internals go after externals and publics
     /// @inheritdoc BasePaymaster
     function _validatePaymasterUserOp(
         UserOperation calldata userOp,
@@ -216,6 +226,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         return (abi.encode(postOpContext), _packValidationData(false, paymasterData.validUntil, paymasterData.validAfter));
     }
 
+    /// @fix internals go after externals and publics
     /// @inheritdoc BasePaymaster
     function _postOp(PostOpMode mode, bytes calldata context, uint256 actualGasCost) internal override {
         PostOpContextData memory c = abi.decode(context, (PostOpContextData));
@@ -270,6 +281,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         );
     }
 
+    /// @fix internals go after externals and publics
     /// @notice Unpack the paymasterAndData field
     ///
     /// @param paymasterAndData PaymasterAndData field from userOp
@@ -308,6 +320,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         Ownable2Step.transferOwnership(newOwner);
     }
 
+    /// @fix internals go after externals and publics
     /// @notice Transfer ownership to new owner using Ownable2Step
     ///
     /// @param newOwner newOwnerAddress
@@ -318,6 +331,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     /// @notice Add a bundler to the allowlist
     ///
     /// @param bundler Bundler address
+    /// @fix make external
     function updateBundlerAllowlist(address bundler, bool allowed) public onlyOwner {
         bundlerAllowed[bundler] = allowed;
         emit BundlerAllowlistUpdated(bundler, allowed);
@@ -331,6 +345,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         emit PendingVerifyingSignerSet(signer);
     }
 
+    /// @fix would prefer to have an internal for setting state and emitting event we can share with constructor
     /// @notice Rotate verifying signer.
     function rotateVerifyingSigner() external onlyOwner {
         if (pendingVerifyingSigner == address(0)) {
@@ -361,6 +376,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         return a < b ? a : b;
     }
 
+    /// @fix externals go before publics and internals 
     /// @notice Withdraws ERC20 from this contract. This is to handle any ERC20 that was sent to this contract by mistake
     ///         and does not have ability to move assets from other addresses.
     ///
