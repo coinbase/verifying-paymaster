@@ -50,7 +50,7 @@ contract VerifyingPaymasterTest is Test {
     }
 
     function test_constructor_reverts_whenEntryPointNotAContract() public {
-        vm.expectRevert(abi.encodeWithSelector(VerifyingPaymaster.InvalidParam.selector, "entryPoint is not a contract"));
+        vm.expectRevert(abi.encodeWithSelector(VerifyingPaymaster.InvalidEntryPoint.selector));
         new VerifyingPaymaster(IEntryPoint(address(0x1234)), PAYMASTER_SIGNER, address(this));
     }
 
@@ -144,7 +144,7 @@ contract VerifyingPaymasterTest is Test {
         );
         signUserOp(userOp);
         vm.prank(address(entrypoint));
-        vm.expectRevert(abi.encodeWithSelector(VerifyingPaymaster.InvalidParam.selector, "invalid signature length in paymasterAndData"));
+        vm.expectRevert(abi.encodeWithSelector(VerifyingPaymaster.InvalidSignatureLength.selector));
         paymaster.validatePaymasterUserOp(userOp, MOCK_HASH , 256);
     }
 
@@ -212,7 +212,6 @@ contract VerifyingPaymasterTest is Test {
     }
 
     function test_entrypointHandleOps_reverts_ForERC20SponsorshipInValidationIfCantPay() public {
-        uint256 initialBalance = mockToken.balanceOf(MOCK_TOKEN_RECEIVER);
         UserOperation memory userOp = createUserOp();
         addPaymasterData(userOp, true, address(mockToken), true);
 
@@ -227,6 +226,7 @@ contract VerifyingPaymasterTest is Test {
 
     function test_entrypointHandleOps_success_ForERC20SponsorshipInValidationIfPrepaymentRequired() public {
         (bool success, ) = address(account).call{value: 1 ether}("");
+        assertTrue(success);
         uint256 initialBalance = mockToken.balanceOf(MOCK_TOKEN_RECEIVER);
         UserOperation memory userOp = createUserOp();
         bytes memory approveCallData = abi.encodeWithSelector(

@@ -7,11 +7,13 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-/// @title Coinbase Developer Platform Paymaster
+/// @title VerifyingPaymaster
 ///
 /// @notice ERC4337 Paymaster implementation compatible with Entrypoint v0.6.
 ///
 /// @dev See https://eips.ethereum.org/EIPS/eip-4337#extension-paymasters.
+///
+/// @author Coinbase
 contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     using UserOperationLib for UserOperation;
     using SafeERC20 for IERC20;
@@ -106,10 +108,11 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     /// @param allowed True if was allowlisted, false if removed from allowlist
     event BundlerAllowlistUpdated(address bundler, bool allowed);
 
-    /// @notice Error for invalid parameters
-    ///
-    /// @param errorMessage Error message for the param
-    error InvalidParam(string errorMessage);
+    /// @notice Error for invalid entrypoint 
+    error InvalidEntryPoint();
+
+    /// @notice Error for an invalid signature length
+    error InvalidSignatureLength();
 
     /// @notice Error for not holding enough balance during prevalidation
     ///
@@ -121,8 +124,8 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     /// @notice Error for bundler not allowed
     error BundlerNotAllowed();
 
-    /// @notice Error for calling a disabled function
-    error FunctionDisabled();
+    /// @notice Error for calling renounceOwnership which has been disabled
+    error RenouceOwnershipDisabled();
 
     /// @notice Error for deposit failure
     error DespositFailed();
@@ -143,11 +146,98 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         Ownable2Step()
     {
         if (address(entryPoint).code.length == 0) {
-            revert InvalidParam("entryPoint is not a contract");
+            revert InvalidEntryPoint();
         }
 
         _transferOwnership(initialOwner);
         verifyingSigner = initialVerifyingSigner;
+    }
+
+     /// @notice Receive Eth and deposit it into the entrypoint
+    receive() external payable {
+        // use address(this).balance rather than msg.value in case of force-send
+        (bool callSuccess,) = payable(address(entryPoint)).call{ value: address(this).balance }("");
+        if (!callSuccess) {
+            revert DespositFailed();
+        }
+    }
+
+     /// @notice Add a bundler to the allowlist
+    ///
+    /// @param bundler Bundler address
+    function updateBundlerAllowlist(address bundler, bool allowed) external onlyOwner {
+        bundlerAllowed[bundler] = allowed;
+        emit BundlerAllowlistUpdated(bundler, allowed);
+    }
+
+    /// @notice Add pending verifying signer.
+    ///
+    /// @param signer Address of new signer to rotate to.
+    function setPendingVerifyingSigner(address signer) external onlyOwner {
+        pendingVerifyingSigner = signer;
+        emit PendingVerifyingSignerSet(signer);
+    }
+
+    /// @notice Rotate verifying signer.
+    function rotateVerifyingSigner() external onlyOwner {
+        if (pendingVerifyingSigner == address(0)) {
+            revert NoPendingSigner();
+        }
+        emit VerifyingSignerRotated(verifyingSigner, pendingVerifyingSigner);
+        verifyingSigner = pendingVerifyingSigner;
+        pendingVerifyingSigner = address(0);
+    }
+
+    /// @notice Renouce is disabled for this contract
+    ///
+    /// @dev Reverts if called.
+    function renounceOwnership() public view override onlyOwner {
+        revert RenouceOwnershipDisabled();
+    }
+
+    /// @notice Transfer ownership to new owner using Ownable2Step
+    ///
+    /// @param newOwner newOwnerAddress
+    function transferOwnership(address newOwner) public override(Ownable2Step, Ownable) onlyOwner {
+        Ownable2Step.transferOwnership(newOwner);
+    }
+
+    /// @notice Get the hash of the UserOperation and relavant paymaster data
+    ///
+    /// @param userOp UserOperation struct
+    /// @param paymasterData PaymasterData struct
+    ///
+    /// @return bytes32 The hash to check the signature against
+    function getHash(UserOperation calldata userOp, PaymasterData memory paymasterData) public view returns (bytes32) {
+        // can't use userOp.hash(), since it contains also the paymasterAndData itself.
+        return keccak256(
+            abi.encode(
+                userOp.getSender(),
+                userOp.nonce,
+                calldataKeccak(userOp.initCode),
+                calldataKeccak(userOp.callData),
+                userOp.callGasLimit,
+                userOp.verificationGasLimit,
+                userOp.preVerificationGas,
+                userOp.maxFeePerGas,
+                userOp.maxPriorityFeePerGas,
+                block.chainid,
+                address(this),
+                paymasterData
+            )
+        );
+    }
+
+    /// @notice Withdraws ERC20 from this contract. This is to handle any ERC20 that was sent to this contract by mistake
+    ///         and does not have ability to move assets from other addresses.
+    ///
+    /// @dev Reverts if not called by the owner of the contract.
+    ///
+    /// @param asset  The asset to withdraw.
+    /// @param to     The beneficiary address.
+    /// @param amount The amount to withdraw.
+    function ownerWithdrawERC20(address asset, address to, uint256 amount) external onlyOwner {
+        IERC20(asset).safeTransfer(to, amount);
     }
 
     /// @inheritdoc BasePaymaster
@@ -164,7 +254,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
 
         // Only support 65-byte signatures, to avoid potential replay attacks.
         if (signature.length != 65) {
-            revert InvalidParam("invalid signature length in paymasterAndData");
+            revert InvalidSignatureLength();
         }
 
         // Check signature is correct
@@ -244,32 +334,6 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         }
     }
 
-    /// @notice Get the hash of the UserOperation and relavant paymaster data
-    ///
-    /// @param userOp UserOperation struct
-    /// @param paymasterData PaymasterData struct
-    ///
-    /// @return bytes32 The hash to check the signature against
-    function getHash(UserOperation calldata userOp, PaymasterData memory paymasterData) public view returns (bytes32) {
-        // can't use userOp.hash(), since it contains also the paymasterAndData itself.
-        return keccak256(
-            abi.encode(
-                userOp.getSender(),
-                userOp.nonce,
-                calldataKeccak(userOp.initCode),
-                calldataKeccak(userOp.callData),
-                userOp.callGasLimit,
-                userOp.verificationGasLimit,
-                userOp.preVerificationGas,
-                userOp.maxFeePerGas,
-                userOp.maxPriorityFeePerGas,
-                block.chainid,
-                address(this),
-                paymasterData
-            )
-        );
-    }
-
     /// @notice Unpack the paymasterAndData field
     ///
     /// @param paymasterAndData PaymasterAndData field from userOp
@@ -294,51 +358,11 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         signature = paymasterAndData[129:];
     }
 
-    /// @notice Renouce is disabled for this contract
-    ///
-    /// @dev Reverts if called.
-    function renounceOwnership() public view override onlyOwner {
-        revert FunctionDisabled();
-    }
-
-    /// @notice Transfer ownership to new owner using Ownable2Step
-    ///
-    /// @param newOwner newOwnerAddress
-    function transferOwnership(address newOwner) public override(Ownable2Step, Ownable) onlyOwner {
-        Ownable2Step.transferOwnership(newOwner);
-    }
-
     /// @notice Transfer ownership to new owner using Ownable2Step
     ///
     /// @param newOwner newOwnerAddress
     function _transferOwnership(address newOwner) internal virtual override(Ownable2Step, Ownable) {
         Ownable2Step._transferOwnership(newOwner);
-    }
-
-    /// @notice Add a bundler to the allowlist
-    ///
-    /// @param bundler Bundler address
-    function updateBundlerAllowlist(address bundler, bool allowed) public onlyOwner {
-        bundlerAllowed[bundler] = allowed;
-        emit BundlerAllowlistUpdated(bundler, allowed);
-    }
-
-    /// @notice Add pending verifying signer.
-    ///
-    /// @param signer Address of new signer to rotate to.
-    function setPendingVerifyingSigner(address signer) external onlyOwner {
-        pendingVerifyingSigner = signer;
-        emit PendingVerifyingSignerSet(signer);
-    }
-
-    /// @notice Rotate verifying signer.
-    function rotateVerifyingSigner() external onlyOwner {
-        if (pendingVerifyingSigner == address(0)) {
-            revert NoPendingSigner();
-        }
-        emit VerifyingSignerRotated(verifyingSigner, pendingVerifyingSigner);
-        verifyingSigner = pendingVerifyingSigner;
-        pendingVerifyingSigner = address(0);
     }
 
     /// @notice Calculate the token cost based on the gas cost and exchange rate
@@ -359,26 +383,5 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     /// @return uint256 Minimum of a and b
     function _min(uint256 a, uint256 b) internal pure returns (uint256) {
         return a < b ? a : b;
-    }
-
-    /// @notice Withdraws ERC20 from this contract. This is to handle any ERC20 that was sent to this contract by mistake
-    ///         and does not have ability to move assets from other addresses.
-    ///
-    /// @dev Reverts if not called by the owner of the contract.
-    ///
-    /// @param asset  The asset to withdraw.
-    /// @param to     The beneficiary address.
-    /// @param amount The amount to withdraw.
-    function ownerWithdrawERC20(address asset, address to, uint256 amount) external onlyOwner {
-        IERC20(asset).safeTransfer(to, amount);
-    }
-
-    /// @notice Receive Eth and deposit it into the entrypoint
-    receive() external payable {
-        // use address(this).balance rather than msg.value in case of force-send
-        (bool callSuccess,) = payable(address(entryPoint)).call{ value: address(this).balance }("");
-        if (!callSuccess) {
-            revert DespositFailed();
-        }
     }
 }
