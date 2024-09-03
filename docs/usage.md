@@ -16,6 +16,13 @@ Our paymaster implementation provides flexibility to accommodate alternative sou
 
 4. **Token and Receiver Specification**: The `token` and `receiver` fields in `PaymasterData` allow for specifying different tokens and receiving addresses for each UserOp, providing flexibility for various payment scenarios.
 
+## ERC20 Tokens with Transfer Fees or Down-Rebasing Mechanisms 
+
+Prepayment refund may fail if the token has fees or down-rebasing mechanisms. It is recommended to 
+- For Fee-Charging tokens you may only be able to use the postOp payment methods. 
+- Thoroughly research the token's behavior, especially regarding transfers and balance adjustments.
+- Consider implementing additional off-chain checks to verify token behavior before allowing its use with the paymaster.
+
 ## Use Case: Coinbase Magic Spend
 
 Coinbase Magic Spend is an example of an auxiliary fund source where the user's funds are managed by Coinbase and so the balance may not be visible until the execution phase (ie user holds 100$ in USDC they are bringing onchain in this txn but want to pay USDC for gas.)
