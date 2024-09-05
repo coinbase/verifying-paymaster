@@ -130,7 +130,9 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     error SenderTokenBalanceTooLow(address token, uint256 balance, uint256 maxTokenCost);
 
     /// @notice Error for bundler not allowed
-    error BundlerNotAllowed();
+    ///
+    /// @param bundler address of the bundler that was not allowlisted 
+    error BundlerNotAllowed(address bundler);
 
     /// @notice Error for calling renounceOwnership which has been disabled
     error RenouceOwnershipDisabled();
@@ -320,7 +322,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
 
         // Reject if should restrict bundlers and bundler not on allowlist to prevent siphoning of funds
         if (!c.allowAnyBundler && !isBundlerAllowed[tx.origin]) {
-            revert BundlerNotAllowed();
+            revert BundlerNotAllowed(tx.origin);
         }
 
         // Attempt transfer if token is set and not mode not postOpReverted
