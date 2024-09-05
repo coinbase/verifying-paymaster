@@ -6,6 +6,7 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable2Step.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {FixedPointMathLib} from "@solady/utils/FixedPointMathLib.sol";
 
 /// @title VerifyingPaymaster
 ///
@@ -372,7 +373,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     ///
     /// @return uint256 Token amount
     function _calculateTokenCost(uint256 gasCost, uint256 tokenExchangeRate) internal pure returns (uint256) {
-        return (gasCost * tokenExchangeRate) / 1e18;
+        return FixedPointMathLib.mulDivUp(gasCost, tokenExchangeRate, 1e18);
     }
 
     /// @notice Simple min function
