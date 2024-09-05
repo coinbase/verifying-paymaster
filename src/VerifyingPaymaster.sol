@@ -47,7 +47,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
 
     /// @notice Context passed to postOp
     struct PostOpContextData {
-        /// @dev UserOp sender
+        /// @dev UserOp's sender
         address sender;
         /// @dev Hash of the userOp
         bytes32 userOpHash;
@@ -58,7 +58,11 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         /// @dev Prepaid token amount during validation
         uint256 prepaidAmount;
         /// @dev Overhead fee for postOp
-        uint256 postOpOverheadFee;
+        uint256 postOpGasCost;
+        /// @dev UserOp's maxPriorityFeePerGas
+        uint256 maxPriorityFeePerGas;
+        /// @dev UserOp's maxFeePerGas
+        uint256 maxFeePerGas;
         /// @dev Token to use for payment or address(0) if no token required
         address token;
         /// @dev Token payment sent to this address
@@ -274,7 +278,9 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
             sponsorUUID: paymasterData.sponsorUUID,
             allowAnyBundler: paymasterData.allowAnyBundler,
             prepaidAmount: 0,
-            postOpOverheadFee: 0,
+            postOpGasCost: paymasterData.postOpGasCost,
+            maxPriorityFeePerGas: userOp.maxPriorityFeePerGas,
+            maxFeePerGas: userOp.maxFeePerGas,
             token: paymasterData.token,
             receiver: paymasterData.receiver,
             exchangeRate: paymasterData.exchangeRate
@@ -282,11 +288,9 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
 
         // Perform additional token logic
         if (paymasterData.token != address(0)) {
-            uint256 gasPrice = _min(userOp.maxFeePerGas, userOp.maxPriorityFeePerGas + block.basefee);
-            postOpContext.postOpOverheadFee = (paymasterData.postOpGasCost * gasPrice);
             if (paymasterData.precheckBalance || paymasterData.prepaymentRequired) {
                 uint256 maxTokenCost =
-                    _calculateTokenCost(maxCost + postOpContext.postOpOverheadFee, paymasterData.exchangeRate);
+                    _calculateTokenCost(maxCost + paymasterData.postOpGasCost * userOp.maxFeePerGas, paymasterData.exchangeRate);
 
                 // Optionally check if sender has enough token balance if prepayment isnt required
                 if (paymasterData.precheckBalance) {
@@ -321,7 +325,8 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         // Attempt transfer if token is set and not mode not postOpReverted
         if (c.token != address(0) && mode != PostOpMode.postOpReverted) {
             // get current gas price and token cost
-            uint256 actualTokenCost = _calculateTokenCost(actualGasCost + c.postOpOverheadFee, c.exchangeRate);
+            uint256 gasPrice = _min(c.maxFeePerGas, c.maxPriorityFeePerGas + block.basefee);
+            uint256 actualTokenCost = _calculateTokenCost(actualGasCost + c.postOpGasCost * gasPrice, c.exchangeRate);
 
             // If not prepaid transfer full amount to receiver else refund sender difference and transfer to receiver
             if (c.prepaidAmount == 0) {
