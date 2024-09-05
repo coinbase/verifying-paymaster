@@ -373,6 +373,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     ///
     /// @return uint256 Token amount
     function _calculateTokenCost(uint256 gasCost, uint256 tokenExchangeRate) internal pure returns (uint256) {
+        // Use mul div up so min amount is 1 
         return FixedPointMathLib.mulDivUp(gasCost, tokenExchangeRate, 1e18);
     }
 
