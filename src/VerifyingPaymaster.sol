@@ -10,6 +10,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {FixedPointMathLib} from "@solady/utils/FixedPointMathLib.sol";
+import {SafeTransferLib} from "solady/utils/SafeTransferLib.sol";
 
 /// @title VerifyingPaymaster
 ///
@@ -20,7 +21,6 @@ import {FixedPointMathLib} from "@solady/utils/FixedPointMathLib.sol";
 /// @author Coinbase
 contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     using UserOperationLib for UserOperation;
-    using SafeERC20 for IERC20;
 
     /// @notice Paymaster data from the user operation
     struct PaymasterData {
@@ -42,8 +42,8 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         address receiver;
         /// @dev Exchange rate for the token
         uint256 exchangeRate;
-        /// @dev Post op gas cost if using token
-        uint48 postOpGasCost;
+        /// @dev Post op gas if using token
+        uint48 postOpGas;
     }
 
     /// @notice Context passed to postOp
@@ -59,7 +59,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         /// @dev Prepaid token amount during validation
         uint256 prepaidAmount;
         /// @dev Overhead fee for postOp
-        uint256 postOpGasCost;
+        uint256 postOpGas;
         /// @dev UserOp's maxPriorityFeePerGas
         uint256 maxPriorityFeePerGas;
         /// @dev UserOp's maxFeePerGas
@@ -131,8 +131,13 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
 
     /// @notice Error for bundler not allowed
     ///
-    /// @param bundler address of the bundler that was not allowlisted 
+    /// @param bundler address of the bundler that was not allowlisted
     error BundlerNotAllowed(address bundler);
+
+    /// @notice Error during token transfer in postOp - must be over 32 bytes
+    ///
+    /// @param message error message
+    error PostOpTransferFailed(string message);
 
     /// @notice Error for calling renounceOwnership which has been disabled
     error RenouceOwnershipDisabled();
@@ -147,11 +152,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     ///
     /// @param entryPoint the entrypoint contract
     /// @param initialVerifyingSigner the address to verify the signature against
-    constructor(
-        IEntryPoint entryPoint,
-        address initialVerifyingSigner,
-        address initialOwner
-    )
+    constructor(IEntryPoint entryPoint, address initialVerifyingSigner, address initialOwner)
         BasePaymaster(entryPoint)
         Ownable2Step()
     {
@@ -198,18 +199,6 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         pendingVerifyingSigner = address(0);
     }
 
-    /// @notice Withdraws ERC20 from this contract. This is to handle any ERC20 that was sent to this contract by mistake
-    ///         and does not have ability to move assets from other addresses.
-    ///
-    /// @dev Reverts if not called by the owner of the contract.
-    ///
-    /// @param asset  The asset to withdraw.
-    /// @param to     The beneficiary address.
-    /// @param amount The amount to withdraw.
-    function ownerWithdrawERC20(address asset, address to, uint256 amount) external onlyOwner {
-        IERC20(asset).safeTransfer(to, amount);
-    }
-
     /// @notice Transfer ownership to new owner using Ownable2Step
     ///
     /// @param newOwner newOwnerAddress
@@ -250,12 +239,20 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         );
     }
 
+    /// @notice Withdraws ERC20 from this contract. This is to handle any ERC20 that was sent to this contract by mistake
+    ///         and does not have ability to move assets from other addresses.
+    ///
+    /// @dev Reverts if not called by the owner of the contract.
+    ///
+    /// @param asset  The asset to withdraw.
+    /// @param to     The beneficiary address.
+    /// @param amount The amount to withdraw.
+    function ownerWithdrawERC20(address asset, address to, uint256 amount) external onlyOwner {
+        SafeTransferLib.safeTransfer(asset, to, amount);
+    }
+
     /// @inheritdoc BasePaymaster
-    function _validatePaymasterUserOp(
-        UserOperation calldata userOp,
-        bytes32 userOpHash,
-        uint256 maxCost
-    )
+    function _validatePaymasterUserOp(UserOperation calldata userOp, bytes32 userOpHash, uint256 maxCost)
         internal
         override
         returns (bytes memory context, uint256 validationData)
@@ -281,7 +278,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
             sponsorUUID: paymasterData.sponsorUUID,
             allowAnyBundler: paymasterData.allowAnyBundler,
             prepaidAmount: 0,
-            postOpGasCost: paymasterData.postOpGasCost,
+            postOpGas: paymasterData.postOpGas,
             maxPriorityFeePerGas: userOp.maxPriorityFeePerGas,
             maxFeePerGas: userOp.maxFeePerGas,
             token: paymasterData.token,
@@ -293,7 +290,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         if (paymasterData.token != address(0)) {
             if (paymasterData.precheckBalance || paymasterData.prepaymentRequired) {
                 uint256 maxTokenCost =
-                    _calculateTokenCost(maxCost + paymasterData.postOpGasCost * userOp.maxFeePerGas, paymasterData.exchangeRate);
+                    _calculateTokenCost(maxCost + paymasterData.postOpGas * userOp.maxFeePerGas, paymasterData.exchangeRate);
 
                 // Optionally check if sender has enough token balance if prepayment isnt required
                 if (paymasterData.precheckBalance) {
@@ -306,7 +303,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
                 // Optionally require prepayment upfront with cost difference to be refunded postOp
                 if (paymasterData.prepaymentRequired) {
                     // attempt transfer, safe transfer will revert on failure and fail validation for userOp
-                    IERC20(paymasterData.token).safeTransferFrom(userOp.sender, address(this), maxTokenCost);
+                    SafeTransferLib.safeTransferFrom(paymasterData.token, userOp.sender, address(this), maxTokenCost);
                     postOpContext.prepaidAmount = maxTokenCost;
                 }
             }
@@ -329,14 +326,23 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         if (c.token != address(0) && mode != PostOpMode.postOpReverted) {
             // get current gas price and token cost
             uint256 gasPrice = _min(c.maxFeePerGas, c.maxPriorityFeePerGas + block.basefee);
-            uint256 actualTokenCost = _calculateTokenCost(actualGasCost + c.postOpGasCost * gasPrice, c.exchangeRate);
-
+            uint256 actualTokenCost = _calculateTokenCost(actualGasCost + c.postOpGas * gasPrice, c.exchangeRate);
+            
             // If not prepaid transfer full amount to receiver else refund sender difference and transfer to receiver
             if (c.prepaidAmount == 0) {
-                IERC20(c.token).safeTransferFrom(c.sender, c.receiver, actualTokenCost);
+                if (!SafeTransferLib.trySafeTransferFrom(c.token, c.sender, c.receiver, actualTokenCost)) {
+                    revert PostOpTransferFailed("ERC20 transfer failed");
+                }
             } else {
-                IERC20(c.token).safeTransfer(c.sender, c.prepaidAmount - actualTokenCost);
-                IERC20(c.token).safeTransfer(c.receiver, actualTokenCost);
+                uint256 refund = c.prepaidAmount - actualTokenCost;
+                if (refund > 0) {
+                    if (!SafeTransferLib.trySafeTransferFrom(c.token, address(this), c.sender, refund)) {
+                        revert PostOpTransferFailed("ERC20 transfer failed");
+                    }
+                }
+                if (!SafeTransferLib.trySafeTransferFrom(c.token, address(this), c.receiver, actualTokenCost)) {
+                    revert PostOpTransferFailed("ERC20 transfer failed");
+                }
             }
 
             emit UserOperationSponsoredWithERC20(c.userOpHash, c.sponsorUUID, c.token, c.receiver, actualTokenCost);
@@ -372,7 +378,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         paymasterData.token = address(bytes20(paymasterAndData[51:71]));
         paymasterData.receiver = address(bytes20(paymasterAndData[71:91]));
         paymasterData.exchangeRate = uint256(bytes32(paymasterAndData[91:123]));
-        paymasterData.postOpGasCost = uint48(bytes6(paymasterAndData[123:129]));
+        paymasterData.postOpGas = uint48(bytes6(paymasterAndData[123:129]));
         signature = paymasterAndData[129:];
     }
 
@@ -383,7 +389,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     ///
     /// @return uint256 Token amount
     function _calculateTokenCost(uint256 gasCost, uint256 tokenExchangeRate) internal pure returns (uint256) {
-        // Use mul div up so min amount is 1 
+        // Use mul div up so min amount is 1
         return FixedPointMathLib.mulDivUp(gasCost, tokenExchangeRate, 1e18);
     }
 

@@ -225,6 +225,7 @@ contract VerifyingPaymasterTest is Test {
     }
 
     function test_entrypointHandleOps_success_ForERC20SponsorshipInValidationIfPrepaymentRequired() public {
+        // First op do not sponsor 
         (bool success, ) = address(account).call{value: 1 ether}("");
         assertTrue(success);
         uint256 initialBalance = mockToken.balanceOf(MOCK_TOKEN_RECEIVER);
@@ -246,10 +247,10 @@ contract VerifyingPaymasterTest is Test {
         uint256 postOpBalance = mockToken.balanceOf(MOCK_TOKEN_RECEIVER);
 
         assertTrue(
-            postOpBalance == initialBalance
+            postOpBalance == initialBalance, "postOpBalance != initial for first transfer"
         );
 
-        // Now sponsor 
+        // Now we pay for the op with the paymaster
         userOp = createUserOp();
         userOp.nonce = 1;
         addPaymasterData(userOp, true, address(mockToken), true);
@@ -260,8 +261,11 @@ contract VerifyingPaymasterTest is Test {
 
         postOpBalance = mockToken.balanceOf(MOCK_TOKEN_RECEIVER);
 
-        assertTrue(
-            postOpBalance > initialBalance
+        assertFalse(
+            postOpBalance == initialBalance, "postOpBalance == initial for second op"
+        );
+         assertTrue(
+            postOpBalance > initialBalance, "postOpBalance < initial for second op"
         );
     }
 
@@ -345,7 +349,7 @@ contract VerifyingPaymasterTest is Test {
                 paymasterData.token,
                 paymasterData.receiver,
                 paymasterData.exchangeRate,
-                paymasterData.postOpGasCost
+                paymasterData.postOpGas
             ),
             r,
             s,
