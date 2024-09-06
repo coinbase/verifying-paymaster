@@ -330,7 +330,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
             } else {
                 uint256 refund = c.prepaidAmount - actualTokenCost;
                 if (refund > 0) {
-                    ERC20(c.token).safeTransfer(c.receiver, refund);
+                    ERC20(c.token).safeTransfer(c.sender, refund);
                 }
                 ERC20(c.token).safeTransfer(c.receiver, actualTokenCost);
             }
