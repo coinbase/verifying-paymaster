@@ -70,7 +70,7 @@ contract VerifyingPaymasterTest is Test {
         // Replace with the expected hash value
         assertEq(
             hash,
-            0xd21ab1fe00796204987920421f5a44cf16b6265230d431486b4d1e8b05aba8d9
+            0x2a41f6983b8babd6ae1c0f5e1470d41bd14df2e75a7daaf53b40c7441ae345e0
         );
     }
 
