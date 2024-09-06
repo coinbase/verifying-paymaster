@@ -8,8 +8,9 @@ import {UserOperation, UserOperationLib} from "@account-abstraction/interfaces/U
 import {Ownable, Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {FixedPointMathLib} from "@solady/utils/FixedPointMathLib.sol";
-import {SafeTransferLib} from "@solmate/utils/SafeTransferLib.sol";
+
 import {ERC20} from "@solmate/tokens/ERC20.sol";
+import {SafeTransferLib} from "@solmate/utils/SafeTransferLib.sol";
 
 /// @title VerifyingPaymaster
 ///
@@ -322,7 +323,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
             // get current gas price and token cost
             uint256 gasPrice = _min(c.maxFeePerGas, c.maxPriorityFeePerGas + block.basefee);
             uint256 actualTokenCost = _calculateTokenCost(actualGasCost + c.postOpGas * gasPrice, c.exchangeRate);
-            
+
             // If not prepaid transfer full amount to receiver else refund sender difference and transfer to receiver
             if (c.prepaidAmount == 0) {
                 ERC20(c.token).safeTransferFrom(c.sender, c.receiver, actualTokenCost);
