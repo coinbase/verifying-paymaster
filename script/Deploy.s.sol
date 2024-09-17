@@ -13,15 +13,6 @@ contract DeployScript is Script {
     address verifyingSigner = vm.envAddress("VERIFYING_SIGNER");
     address owner = vm.envAddress("OWNER");
 
-    address deploymentAddress = SafeSingletonDeployer.computeAddress({
-        creationCode: type(VerifyingPaymaster).creationCode,
-        args: abi.encode(entrypoint, verifyingSigner, owner),
-        salt: 0x3078636200000000000000000000000000000000000000000000000000000000
-    });
-
-    console2.log("Deployment Address");
-    console2.log(deploymentAddress);
-
     SafeSingletonDeployer.broadcastDeploy({
       deployerPrivateKey: deployerPrivateKey,
       creationCode: type(VerifyingPaymaster).creationCode,
