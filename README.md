@@ -29,8 +29,8 @@ For more information on ERC-4337, please refer to the [official EIP](https://eip
 
 Contract addresses for VerifyingPaymaster:
 
-- Base: 0x2FAEB0760D4230Ef2aC21496Bb4F0b47D634FD4c
-- Base Sepolia: 0x8255f0c3b1d252e93843d97f4e8ae9da792cd8e5
+- Base: ```0x2FAEB0760D4230Ef2aC21496Bb4F0b47D634FD4c```
+- Base Sepolia: ```0x709a4bae3db73a8e717aefca13e88512f738b27f```
 
 ## Development
 
