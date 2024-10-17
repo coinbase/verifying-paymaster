@@ -1,7 +1,7 @@
 [submodule "lib/account-abstraction"]
-	path = lib/account-abstraction
+	path = lib/account-abstraction-v06
 	url = https://github.com/eth-infinitism/account-abstraction
-    branch = releases/v0.6
+    branch = releases/v0.7
 [submodule "lib/openzeppelin-foundry-upgrades"]
 	path = lib/openzeppelin-foundry-upgrades
 	url = https://github.com/OpenZeppelin/openzeppelin-foundry-upgrades
@@ -11,7 +11,7 @@
 [submodule "lib/openzeppelin-contracts"]
 	path = lib/openzeppelin-contracts
 	url = https://github.com/OpenZeppelin/openzeppelin-contracts
-    branch = release-v4.9
+    branch = v5.0.0
 [submodule "lib/solady"]
 	path = lib/solady
 	url = https://github.com/Vectorized/solady
@@ -21,3 +21,4 @@
 [submodule "lib/solmate"]
 	path = lib/solmate
 	url = https://github.com/transmissions11/solmate
+
