@@ -17,7 +17,7 @@ contract DeployScript is Script {
       deployerPrivateKey: deployerPrivateKey,
       creationCode: type(VerifyingPaymaster).creationCode,
       args: abi.encode(entrypoint, verifyingSigner, owner),
-      salt: 0x3078636200000000000000000000000000000000000000000000000000000000
+      salt: 0x21131ec18e9699e34bcca1b1a24fb3c330638385e61180d6a8fa38ff2c3e6404
     });
   }
 }
