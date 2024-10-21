@@ -4,7 +4,7 @@
 
 VerifyingPaymaster is an ERC4337-compatible paymaster contract that accepts a signature for validation and can perform optional prechecks and ERC20 token transfers. It supports the option to restrict sponsorship to certain bundlers. 
 
-This paymaster implementation is designed to work with EntryPoint v0.6 and provides flexibility in handling user operations, including sponsorship and token-based fee payments.
+This paymaster implementation is designed to work with EntryPoint v0.7 and provides flexibility in handling user operations, including sponsorship and token-based fee payments. Please see previous releases for previous entrypoint compatibility. 
 
 This contract is used as the Coinbase Developer Platform Paymaster for standard sponsorships.
 
@@ -27,10 +27,15 @@ For more information on ERC-4337, please refer to the [official EIP](https://eip
 
 ## Deployments
 
-Contract addresses for VerifyingPaymaster:
+Contract addresses for V06 VerifyingPaymaster:
 
 - Base: ```0x2FAEB0760D4230Ef2aC21496Bb4F0b47D634FD4c```
 - Base Sepolia: ```0x709a4bae3db73a8e717aefca13e88512f738b27f```
+
+Contract addresses for V07 VerifyingPaymaster:
+
+- Base: ```TBD```
+- Base Sepolia: ```0xd70C498E7302620c995Ac892F715B1a3099d637E``` (Will change)
 
 ## Development
 
