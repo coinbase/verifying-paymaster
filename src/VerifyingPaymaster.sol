@@ -102,9 +102,6 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     /// @param newSigner Address of the new signer
     event VerifyingSignerRotated(address oldSigner, address newSigner);
 
-    /// @notice Error for invalid entrypoint
-    error InvalidEntryPoint();
-
     /// @notice Error for an invalid signature length
     error InvalidSignatureLength();
 
@@ -132,10 +129,6 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         BasePaymaster(entryPoint)
         Ownable2Step()
     {
-        if (address(entryPoint).code.length == 0) {
-            revert InvalidEntryPoint();
-        }
-
         _transferOwnership(initialOwner);
         verifyingSigner = initialVerifyingSigner;
     }
@@ -223,7 +216,7 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         override
         returns (bytes memory context, uint256 validationData)
     {
-        (PaymasterData memory paymasterData, bytes memory signature) = _parsePaymasterAndData(userOp.paymasterAndData);
+        (PaymasterData memory paymasterData, bytes memory signature) = _parsePaymasterData(userOp.paymasterAndData[UserOperationLib.PAYMASTER_DATA_OFFSET:]);
 
         // Only support 65-byte signatures, to avoid potential replay attacks.
         if (signature.length != 65) {
@@ -319,21 +312,21 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
     ///
     /// @return paymasterData Filled in PaymasterData struct
     /// @return signature Paymaster signature
-    function _parsePaymasterAndData(bytes calldata paymasterAndData)
+    function _parsePaymasterData(bytes calldata paymasterAndData)
         internal
         pure
         returns (PaymasterData memory paymasterData, bytes calldata signature)
     {
-        paymasterData.validUntil = uint48(bytes6(paymasterAndData[20:26]));
-        paymasterData.validAfter = uint48(bytes6(paymasterAndData[26:32]));
-        paymasterData.sponsorUUID = uint128(bytes16(paymasterAndData[32:48]));
-        paymasterData.precheckBalance = paymasterAndData[48] > 0;
-        paymasterData.prepaymentRequired = paymasterAndData[49] > 0;
-        paymasterData.token = address(bytes20(paymasterAndData[50:70]));
-        paymasterData.receiver = address(bytes20(paymasterAndData[70:90]));
-        paymasterData.exchangeRate = uint256(bytes32(paymasterAndData[90:122]));
-        paymasterData.postOpGas = uint48(bytes6(paymasterAndData[122:128]));
-        signature = paymasterAndData[128:];
+        paymasterData.validUntil = uint48(bytes6(paymasterAndData[0:6]));
+        paymasterData.validAfter = uint48(bytes6(paymasterAndData[6:12]));
+        paymasterData.sponsorUUID = uint128(bytes16(paymasterAndData[12:28]));
+        paymasterData.precheckBalance = paymasterAndData[28] > 0;
+        paymasterData.prepaymentRequired = paymasterAndData[29] > 0;
+        paymasterData.token = address(bytes20(paymasterAndData[30:50]));
+        paymasterData.receiver = address(bytes20(paymasterAndData[50:70]));
+        paymasterData.exchangeRate = uint256(bytes32(paymasterAndData[70:102]));
+        paymasterData.postOpGas = uint48(bytes6(paymasterAndData[102:108]));
+        signature = paymasterAndData[108:];
     }
 
     /// @notice Calculate the token cost based on the gas cost and exchange rate
