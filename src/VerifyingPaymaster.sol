@@ -65,6 +65,10 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
         address receiver;
         /// @dev Exchange rate for the token
         uint256 exchangeRate;
+        /// @dev Execution gas limit
+        uint256 executionGasLimit;
+        /// @dev PreOp gas approximation
+        uint256 preOpGasApproximation;
     }
 
     /// @notice The address to verify the signature against
@@ -304,11 +308,19 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
             postOpGas: paymasterData.postOpGas,
             token: paymasterData.token,
             receiver: paymasterData.receiver,
-            exchangeRate: paymasterData.exchangeRate
+            exchangeRate: paymasterData.exchangeRate,
+            executionGasLimit: 0,
+            preOpGasApproximation: 0
         });
 
         // Perform additional token logic
         if (paymasterData.token != address(0)) {
+             postOpContext.executionGasLimit = userOp.unpackCallGasLimit() + userOp.unpackPostOpGasLimit();
+             postOpContext.preOpGasApproximation =
+                 userOp.preVerificationGas +
+                 userOp.unpackVerificationGasLimit() +
+                 paymasterValidationGasLimit;
+
             if (paymasterData.precheckBalance || paymasterData.prepaymentRequired) {
                 uint256 maxTokenCost =
                     _calculateTokenCost(maxCost, paymasterData.exchangeRate);
@@ -343,8 +355,18 @@ contract VerifyingPaymaster is BasePaymaster, Ownable2Step {
 
         // Attempt token transfer 
         if (c.token != address(0)) {
+            uint256 actualGas = actualGasCost / actualUserOpFeePerGas;
+            uint256 executionGasUsed;
+            if (actualGas + c.postOpGas > c.preOpGasApproximation) {
+                executionGasUsed = actualGas + c.postOpGas - c.preOpGasApproximation;
+            }
+            uint256 expectedPenaltyGas;
+            if (c.executionGasLimit > executionGasUsed) {
+                expectedPenaltyGas = (c.executionGasLimit - executionGasUsed) * 10 / 100;
+            }
+
             // get current gas price and token cost
-            uint256 actualTokenCost = _calculateTokenCost(actualGasCost + c.postOpGas * actualUserOpFeePerGas, c.exchangeRate);
+            uint256 actualTokenCost = _calculateTokenCost(actualGasCost + (c.postOpGas + expectedPenaltyGas) * actualUserOpFeePerGas, c.exchangeRate);
 
             // If not prepaid transfer full amount to receiver else refund sender difference and transfer to receiver
             if (c.prepaidAmount == 0) {
